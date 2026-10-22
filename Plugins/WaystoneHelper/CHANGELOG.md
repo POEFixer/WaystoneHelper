@@ -1,0 +1,17 @@
+# Changelog
+
+## 1.4.1
+
+- Now maintained by POEFixer; the affix table is built in, so no data file is needed next to the plugin.
+- Waystones are found and read in the background, off the game frame: no periodic stutter with a full stash tab, and no reading at all while you are away from the game.
+- Badges update right after you use currency on a waystone, and follow stash tab switches faster.
+- Map-stat badges keep working after a game patch: the plugin re-detects the stat numbers from your waystones.
+- Fixed a possible crash when turning "Read item mods" off while a stash was open.
+- Badges stay inside their waystone, scale with the overlay font and sit behind the Fixer menu while it is open.
+- Border groups can be moved up and down (the first matching group wins) and show a summary of their conditions.
+- Redesigned settings tab and hover panel; settings are saved as soon as you change them, and safely; a damaged or locked settings file is kept instead of being replaced by the defaults.
+
+## 1.4.0 and earlier
+
+Released by the original author, Ömer Faruk ARPA
+(https://github.com/omrfarukarpa/poefixer-waystone-helper).

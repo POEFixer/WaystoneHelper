@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.2
+
+- The "?" next to a section title now sits in its own gap instead of on the section's line.
+- Diagnostics now looks the same as in the other POEFixer plugins.
+- The bottom of the settings tab names the plugin's original author, as in the other plugins maintained by POEFixer.
+
 ## 1.4.1
 
 - Now maintained by POEFixer; the affix table is built in, so no data file is needed next to the plugin.

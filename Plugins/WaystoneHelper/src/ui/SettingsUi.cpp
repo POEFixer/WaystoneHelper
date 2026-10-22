@@ -165,6 +165,9 @@ void WaystonePlugin::DrawSettings() {
     }
     ImGui::Spacing();
     DrawSectionDiagnostics();
+    ImGui::Spacing();
+    PluginUi::Hint("Originally created by Omer Faruk ARPA. Maintained by POEFixer. GPL-3.0.");
+    ImGui::Spacing();
     ImGui::PopID();
 
     // Write once an edit is complete, not every frame of a drag.
@@ -174,11 +177,11 @@ void WaystonePlugin::DrawSettings() {
 // Status card: what the plugin does, whether the overlay is shown, Reset display.
 void WaystonePlugin::DrawHeader() {
     Ui::BeginCard("##status");
-    Ui::Heading(ICON_FA_MAP, "Waystones");
-    Ui::HelpMarker("Waystones in your inventory, stash and guild stash get badges: the affix count in the "
-                   "top-left corner, map-stat totals in the top-right corner and matching affix groups on "
-                   "the left. Border groups colour the frame of waystones that meet your conditions.\n\n"
-                   "Hover a marked waystone for a breakdown of what it matched.");
+    Ui::Heading(ICON_FA_MAP, "Waystones",
+                "Waystones in your inventory, stash and guild stash get badges: the affix count in the "
+                "top-left corner, map-stat totals in the top-right corner and matching affix groups on "
+                "the left. Border groups colour the frame of waystones that meet your conditions.\n\n"
+                "Hover a marked waystone for a breakdown of what it matched.");
     if (m_overlayHidden) {
         const std::string hint = std::string("Press ") + Ui::KeyName(m_settings.toggleOverlayVk) +
                                  " in game to show the badges again.";
@@ -288,10 +291,10 @@ void WaystonePlugin::DrawSectionMapStats() {
     auto& s = m_settings;
     bool changed = false;
     Ui::BeginCard("##mapStats");
-    Ui::Heading(ICON_FA_LIST_CHECK, "Map stats");
-    Ui::HelpMarker("Badges in the top-right corner with the waystone's total of a map stat,\n"
-                   "e.g. R65 = 65% more Rarity of Items. Borders based on these totals\n"
-                   "are set up under Border groups.");
+    Ui::Heading(ICON_FA_LIST_CHECK, "Map stats",
+                "Badges in the top-right corner with the waystone's total of a map stat,\n"
+                "e.g. R65 = 65% more Rarity of Items. Borders based on these totals\n"
+                "are set up under Border groups.");
     changed |= Ui::Check("Show map-stat badges", "statBadges", &s.highlightImportantAffixes,
                          "Draws a badge for each stat ticked below.");
     ImGui::BeginDisabled(!s.highlightImportantAffixes);
@@ -333,11 +336,11 @@ void WaystonePlugin::DrawSectionBorders() {
     auto& s = m_settings;
     bool changed = false;
     Ui::BeginCard("##bordersCard");
-    Ui::Heading(ICON_FA_SQUARE, "Border groups");
-    Ui::HelpMarker("Each group colours the border of waystones that meet ALL of its conditions:\n"
-                   "map-stat totals, tier, affix count, corruption and rarity.\n"
-                   "Conditions left at Any are ignored. The first matching group in the\n"
-                   "list wins, and a group without conditions never matches.");
+    Ui::Heading(ICON_FA_SQUARE, "Border groups",
+                "Each group colours the border of waystones that meet ALL of its conditions:\n"
+                "map-stat totals, tier, affix count, corruption and rarity.\n"
+                "Conditions left at Any are ignored. The first matching group in the\n"
+                "list wins, and a group without conditions never matches.");
     changed |= Ui::Check("Draw borders", "drawBorders", &s.borderEnabled, "Turns every border group on or off.");
     ImGui::BeginDisabled(!s.borderEnabled);
     {
@@ -469,10 +472,10 @@ void WaystonePlugin::DrawSectionAffixGroups() {
     auto& s = m_settings;
     bool changed = false;
     Ui::BeginCard("##groupsCard");
-    Ui::Heading(ICON_FA_LAYER_GROUP, "Affix groups");
-    Ui::HelpMarker("A group is a set of waystone affixes you care about. A waystone matches\n"
-                   "when it has at least the chosen number of them, and gets a badge on\n"
-                   "the left in the group's colour: matched/selected, e.g. 2/3.");
+    Ui::Heading(ICON_FA_LAYER_GROUP, "Affix groups",
+                "A group is a set of waystone affixes you care about. A waystone matches\n"
+                "when it has at least the chosen number of them, and gets a badge on\n"
+                "the left in the group's colour: matched/selected, e.g. 2/3.");
     changed |= Ui::Check("Match affix groups", "matchGroups", &s.enableAffixGroups,
                          "Checks every waystone against the groups below.");
     ImGui::BeginDisabled(!s.enableAffixGroups);
@@ -625,14 +628,9 @@ void WaystonePlugin::DrawAffixPicker(WaystoneHelperConfig::AffixGroup& g) {
 // ---------------------------------------------------------------------------
 
 void WaystonePlugin::DrawSectionDiagnostics() {
-    Ui::BeginCard("##diagCard");
-    ImGui::PushStyleColor(ImGuiCol_Text, Ui::Colors().Accent);
-    const bool open = ImGui::TreeNodeEx(ICON_FA_STETHOSCOPE "  Diagnostics###diag", ImGuiTreeNodeFlags_SpanAvailWidth);
-    ImGui::PopStyleColor();
-    if (!open) {
-        Ui::EndCard();
+    if (!Ui::BeginDiagnostics("Refresh timings, reading item mods, the game's map-stat keys and a dump of the "
+                              "waystones on screen."))
         return;
-    }
     const Ui::Palette pal = Ui::Colors();
     WrappedDisabled(m_dataStatus);
     char buf[192];
@@ -712,8 +710,7 @@ void WaystonePlugin::DrawSectionDiagnostics() {
             "debug\\waystone-dump.txt in the plugin folder, for bug reports.\nOpen a stash with waystones first.");
     if (!m_dumpStatus.empty()) WrappedDisabled(m_dumpStatus);
     if (m_lastHoveredAddress) WrappedDisabled("Last hovered waystone: " + m_lastHoveredName);
-    ImGui::TreePop();
-    Ui::EndCard();
+    Ui::EndDiagnostics();
 }
 
 // ---------------------------------------------------------------------------

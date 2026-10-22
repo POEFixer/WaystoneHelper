@@ -12,7 +12,7 @@
 POEFIXER_PLUGIN_INFO(
     "WaystoneHelper",
     "Waystone Helper",
-    "1.4.1",
+    "1.4.2",
     "Omer Faruk ARPA, POEFixer",
     "Marks waystones in your inventory and stash with affix-count, map-stat and affix-group badges, coloured borders by your own rules, and a hover breakdown.")
 

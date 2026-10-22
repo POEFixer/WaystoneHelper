@@ -1,6 +1,6 @@
 # Waystone Helper
 
-Current version: 1.4.1
+Current version: 1.4.2
 
 Requires POE2Fixer 364 or newer.
 

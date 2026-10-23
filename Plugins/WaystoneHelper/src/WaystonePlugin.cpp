@@ -12,7 +12,7 @@
 POEFIXER_PLUGIN_INFO(
     "WaystoneHelper",
     "Waystone Helper",
-    "1.4.3",
+    "1.4.4",
     "Omer Faruk ARPA, POEFixer",
     "Marks waystones in your inventory and stash with affix-count, map-stat and affix-group badges, coloured borders by your own rules, and a hover breakdown.")
 
@@ -280,13 +280,24 @@ void WaystonePlugin::PollOverlayHotkey() {
     // state) or while the player types into a Fixer text field. Marking the key
     // as held also makes a freshly bound key wait for its release before it
     // toggles anything.
-    if (PluginUi::detail::CapturingId() != 0 || ImGui::GetIO().WantTextInput) {
+    if (PluginUi::detail::CapturingId() != 0 || ImGui::GetIO().WantTextInput || MenuWantsTextInput()) {
         m_toggleWasDown = true;
         return;
     }
     const bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
     if (down && !m_toggleWasDown) m_overlayHidden = !m_overlayHidden;
     m_toggleWasDown = down;
+}
+
+bool WaystonePlugin::MenuWantsTextInput() const {
+    // A separate menu window has its own ImGui context: a Fixer text field typed
+    // into there does not show in the io of the overlay's context DrawUI runs in.
+    ImGuiContext* const current = ImGui::GetCurrentContext();
+    if (!m_menuContext || !current || m_menuContext == current) return false;
+    ImGui::SetCurrentContext(m_menuContext);
+    const bool typing = ImGui::GetIO().WantTextInput;
+    ImGui::SetCurrentContext(current);
+    return typing;
 }
 
 void WaystonePlugin::WriteDump() {

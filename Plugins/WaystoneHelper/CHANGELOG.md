@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.4
+
+- Works with the separate menu window (POEFixer 366): the host hands the plugin the right drawing context for its settings tab and for its overlay.
+- The overlay toggle key no longer fires while you type into a POEFixer text field in a separate menu window.
+
 ## 1.4.3
 
 - Rebuilt with the updated plugin SDK headers (POEFixer 365 adds optional calls for UI control names, stash objects and tabs, wider entity scans and the host automation flag). No change in what the plugin does.

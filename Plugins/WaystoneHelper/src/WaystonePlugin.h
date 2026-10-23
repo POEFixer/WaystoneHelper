@@ -19,6 +19,8 @@
 #include <unordered_map>
 #include <vector>
 
+struct ImGuiContext;
+
 class WaystonePlugin : public PluginSDK::Plugin {
 public:
     ~WaystonePlugin() override { m_worker.Stop(); }   // hot reload unloads the DLL: no thread may outlive it
@@ -55,6 +57,7 @@ private:
     void ApplyCalibration();
     const Shown* FindHovered(float mx, float my) const;
     void PollOverlayHotkey();
+    bool MenuWantsTextInput() const;
     void PushOptions();
     void ResetScanState(bool resetCalibration);
     const WaystoneHelper::StatKeyCalibrator& Calibration() const {
@@ -108,6 +111,10 @@ private:
     // Overlay toggle hotkey (bound with PluginUi::HotkeyCapture).
     bool m_overlayHidden = false;
     bool m_toggleWasDown = false;
+    // The ImGui context the settings tab was last drawn in: the host's menu, which
+    // lives as long as the plugin. With a separate menu window it differs from the
+    // overlay's context that DrawUI runs in.
+    ImGuiContext* m_menuContext = nullptr;
 
     // Diagnostics.
     std::uintptr_t m_lastHoveredAddress = 0;

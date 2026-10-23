@@ -122,6 +122,7 @@ void WrappedDisabled(const std::string& text) {
 void WaystonePlugin::DrawSettings() {
     if (!m_loaded || !ctx()->ImGuiContext) return;
     BindImGui();
+    m_menuContext = ImGui::GetCurrentContext();   // see PollOverlayHotkey
     // ImGui 1.93 keeps its word-wrap character classes in a per-DLL static that
     // only the copy which builds the font atlas initialises (the host's). This
     // DLL's copy wraps our text, so set it up here (idempotent, one check).

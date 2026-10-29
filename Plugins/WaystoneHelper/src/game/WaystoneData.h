@@ -2,6 +2,11 @@
 // The waystone affix families and the "final from map" stats each map mod adds.
 // The table ships inside the DLL (WaystoneDataEmbedded.h, generated from
 // data/waystone_data.json), so the plugin needs no data file next to it.
+// Its English labels are also lang/en.json texts: an affix's label is the key
+// "affix_<id>" (lang/dynamic_prefixes.txt lists "affix_") whose text holds {n1},
+// {n2}, ... where the label's numbers go (FillNumbers puts the table's numbers
+// back), and a tracked stat's name is StatNameKey(); tests/test_waystone.cpp
+// checks both against lang/en.json.
 
 #include "WaystoneTypes.h"
 
@@ -33,16 +38,104 @@ struct GeneratedStat {
 
 struct Affix {
     std::string Id;
-    std::string Label;
+    std::string LabelKey;    // lang/en.json key of the label ("affix_<Id>")
+    std::string Label;       // the table's English label, lines joined by " / "
     std::string Short;       // the first line of Label ("(20-24)% increased Monster Damage")
     std::string Category;    // "Prefix" / "Suffix"
+    std::vector<std::string> Numbers;   // LabelNumbers(Label): {n1}, {n2}, ... of its lang/en.json text
     std::vector<std::string> ModIds;
     std::unordered_set<std::string> NormModIds;
 };
 
+// The numbers of an affix label, in order, each with its sign, range and percent
+// sign: "(20-24)% increased Monster Damage / 20% more Waystones found in Area" ->
+// {"(20-24)%", "20%"}; "-(10-8)% maximum Player Resistances" -> {"-(10-8)%"}.
+inline std::vector<std::string> LabelNumbers(std::string_view label) {
+    std::vector<std::string> out;
+    const auto digit = [&](std::size_t i) { return i < label.size() && label[i] >= '0' && label[i] <= '9'; };
+    // Digits with an optional fraction from i; returns the index after them (i: none).
+    const auto number = [&](std::size_t i) {
+        std::size_t j = i;
+        while (digit(j)) ++j;
+        if (j > i && j + 1 < label.size() && label[j] == '.' && digit(j + 1)) {
+            ++j;
+            while (digit(j)) ++j;
+        }
+        return j;
+    };
+    std::size_t i = 0;
+    while (i < label.size()) {
+        const bool wordBefore = i > 0 && AsciiAlnum(label[i - 1]);
+        std::size_t start = i;
+        std::size_t j = i;
+        if (!wordBefore && (label[j] == '+' || label[j] == '-') && (digit(j + 1) || (j + 1 < label.size() && label[j + 1] == '(')))
+            ++j;
+        std::size_t end = j;
+        if (j < label.size() && label[j] == '(' && digit(j + 1)) {
+            std::size_t k = number(j + 1);
+            if (k < label.size() && label[k] == '-' && digit(k + 1)) {
+                k = number(k + 1);
+                if (k < label.size() && label[k] == ')') end = k + 1;
+            }
+        } else if (!wordBefore && digit(j)) {
+            end = number(j);
+        }
+        if (end == j) {   // no number here
+            ++i;
+            continue;
+        }
+        if (end < label.size() && label[end] == '%') ++end;
+        out.emplace_back(label.substr(start, end - start));
+        i = end;
+    }
+    return out;
+}
+
+// `text` with each {n1}, {n2}, ... replaced by numbers[0], numbers[1], ...; a
+// placeholder without a number stays as it is.
+inline std::string FillNumbers(std::string_view text, const std::vector<std::string>& numbers) {
+    std::string out;
+    out.reserve(text.size() + 16);
+    std::size_t i = 0;
+    while (i < text.size()) {
+        if (text[i] == '{' && i + 2 < text.size() && text[i + 1] == 'n') {
+            std::size_t j = i + 2;
+            std::size_t index = 0;
+            while (j < text.size() && text[j] >= '0' && text[j] <= '9' && index < 1000)
+                index = index * 10 + static_cast<std::size_t>(text[j++] - '0');
+            if (j > i + 2 && j < text.size() && text[j] == '}' && index >= 1 && index <= numbers.size()) {
+                out += numbers[index - 1];
+                i = j + 1;
+                continue;
+            }
+        }
+        out += text[i++];
+    }
+    return out;
+}
+
+// The lang/en.json key of a tracked stat's name; nullptr for a stat the table adds
+// later (its English name from the table is shown then).
+inline const char* StatNameKey(std::string_view statId) {
+    if (statId == StatIds::MonsterEffectiveness) return Key("stat_monster_effectiveness");
+    if (statId == StatIds::ItemRarity)           return Key("stat_item_rarity");
+    if (statId == StatIds::PackSize)             return Key("stat_pack_size");
+    if (statId == StatIds::MonsterRarity)        return Key("stat_monster_rarity");
+    if (statId == StatIds::WaystoneDropChance)   return Key("stat_waystone_drop_chance");
+    return nullptr;
+}
+
+// The lang/en.json key of an affix category's heading ("Prefix" / "Suffix" / other).
+inline const char* CategoryKey(std::string_view category) {
+    if (category == "Prefix") return Key("category_prefix");
+    if (category == "Suffix") return Key("category_suffix");
+    return Key("category_other");
+}
+
 class WaystoneData {
 public:
-    // Parses the table; returns a one-line status for the Diagnostics card.
+    // Parses the table; returns a one-line English status (the Diagnostics card words
+    // Loaded(), Affixes().size() and ModCount() in the program language).
     std::string LoadFromText(std::string_view text) {
         m_affixes.clear();
         m_affixIndex.clear();
@@ -63,6 +156,7 @@ public:
     }
 
     bool Loaded() const { return m_loaded; }
+    std::size_t ModCount() const { return m_modStatIds.size(); }
     const std::vector<GeneratedStat>& GeneratedStats() const { return m_generatedStats; }
     const std::vector<Affix>& Affixes() const { return m_affixes; }
 
@@ -128,8 +222,10 @@ private:
             Affix a;
             a.Id = Str(e, "id");
             if (a.Id.empty()) continue;
+            a.LabelKey = "affix_" + a.Id;
             a.Label = Str(e, "label");
             if (a.Label.empty()) a.Label = a.Id;
+            a.Numbers = LabelNumbers(a.Label);
             const auto cut = a.Label.find(" / ");
             a.Short = cut == std::string::npos ? a.Label : a.Label.substr(0, cut);
             a.Category = Str(e, "category");

@@ -1,6 +1,6 @@
 # Waystone Helper
 
-Current version: 1.4.4
+Current version: 1.4.5
 
 Requires POE2Fixer 364 or newer.
 
@@ -81,6 +81,10 @@ keeps your groups and hotkey.
 - The plugin's own *Enable* switch and the *Debug mode* option of older versions
   are gone: use the Enabled checkbox of the plugin tab, and the dump button in
   Diagnostics.
+- Languages: the plugin follows the program language. A group added with the
+  *Add border group* or *Add affix group* button is named in the language of
+  that moment ("Group 2", "Группа 2") and keeps that name after a language
+  switch, like any name you type.
 
 ## Install
 
@@ -93,11 +97,12 @@ This repository is the plugin folder from the POE2Fixer source tree (`Plugins/Wa
 - `POEFixer/plugin_sdk/` - the POE2Fixer Plugin SDK v6 headers (`PluginAbi.h`, `PluginSDK.h`)
 - `POEFixer/imgui/` - the Dear ImGui sources the DLL compiles against
 - `POEFixer/core/` - small self-contained helper headers used by the plugin
+- `tools/plugin_i18n/gen.py` - the translation tool: after editing `Plugins/WaystoneHelper/lang/en.json` run `python tools/plugin_i18n/gen.py Plugins/WaystoneHelper` (it rewrites the embedded English header); `--gate` checks every language file and the keys the sources use
 
 1. Install Visual Studio 2022 with the "Desktop development with C++" workload (MSVC v143, Windows 10/11 SDK).
 2. Open `WaystoneHelper.sln`, select **Release | x64** and build the solution.
 3. The plugin is written to `x64\Release\Plugins\WaystoneHelper\WaystoneHelper.dll` (Release builds carry no debug information, see `Directory.Build.targets`).
-4. Copy `WaystoneHelper.dll` into `Plugins\WaystoneHelper\` next to the POE2Fixer executable.
+4. Copy `WaystoneHelper.dll` into `Plugins\WaystoneHelper\` next to the POE2Fixer executable, together with `Plugins\WaystoneHelper\lang` from this repository (same folder names).
 
 ## Credits
 

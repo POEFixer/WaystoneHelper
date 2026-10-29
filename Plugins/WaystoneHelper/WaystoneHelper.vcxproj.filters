@@ -59,6 +59,9 @@
     <ClInclude Include="src\WaystonePlugin.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="src\lang_en.generated.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="src\config\Settings.h">
       <Filter>src\config</Filter>
     </ClInclude>
@@ -87,6 +90,9 @@
       <Filter>src\game</Filter>
     </ClInclude>
     <ClInclude Include="src\ui\Overlay.h">
+      <Filter>src\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\TextUtil.h">
       <Filter>src\ui</Filter>
     </ClInclude>
     <ClInclude Include="..\..\POEFixer\plugin_sdk\PluginAbi.h">

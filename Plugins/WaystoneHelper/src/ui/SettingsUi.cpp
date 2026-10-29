@@ -2,8 +2,11 @@
 // Health Bars / Atlas tabs: a status card, sub-tabs of padded cards (one
 // measured label column per card, controls capped at ~15 em, wrapped tooltips,
 // dimmed dependents), and a collapsed Diagnostics card at the bottom.
+// Every text is a key of lang/en.json, looked up here in the program language
+// (PluginI18n) every frame; the affix labels are "affix_<id>" keys.
 
 #include "../WaystonePlugin.h"
+#include "TextUtil.h"
 
 #include "../../../../POEFixer/imgui/IconsFontAwesome6.h"
 #include "../../../../POEFixer/plugin_sdk/PluginUi.h"
@@ -15,8 +18,10 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <string_view>
 
 namespace Ui = PluginUi;
+namespace I18n = PluginSDK::I18n;
 
 namespace {
 
@@ -27,8 +32,83 @@ void TruncateUtf8(std::string& s, std::size_t maxBytes) {
     s.resize(n);
 }
 
-const char* const kCorruptionItems[] = {"Any", "Corrupted only", "Not corrupted"};
-const char* const kRarityItems[] = {"Any", "Normal", "Magic", "Rare", "Unique"};
+std::string Num(int v) { return std::to_string(v); }
+std::string Num(std::size_t v) { return std::to_string(v); }
+
+// A number with two decimals for a TrF argument (the format is code, never a text).
+std::string Num2(double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.2f", v);
+    return buf;
+}
+
+// "<icon>  <text>###<id>": a label whose ImGui id is the same in every language.
+std::string IconLabel(const char* icon, std::string_view text, const char* id) {
+    return std::string(icon) + "  " + std::string(text) + "###" + id;
+}
+
+// Marks where a slider's own number goes in a translated text (a TrF argument); NumberFormat
+// turns the first mark into the conversion (TextUtil.h).
+constexpr const char* kValue = WaystoneHelper::kNumberMark;
+using WaystoneHelper::NumberFormat;
+
+// Lower case for searching translated texts: ASCII, Latin-1 letters and Cyrillic
+// (the scripts of the program languages that have case), other bytes unchanged.
+std::string FoldCase(std::string_view s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c >= 'A' && c <= 'Z') {
+            out += static_cast<char>(c + ('a' - 'A'));
+        } else if (c == 0xC3 && i + 1 < s.size()) {
+            unsigned char d = static_cast<unsigned char>(s[i + 1]);
+            if (d >= 0x80 && d <= 0x9E && d != 0x97) d = static_cast<unsigned char>(d + 0x20);  // U+00C0..U+00DE
+            out += static_cast<char>(c);
+            out += static_cast<char>(d);
+            ++i;
+        } else if (c == 0xD0 && i + 1 < s.size()) {
+            const unsigned char d = static_cast<unsigned char>(s[i + 1]);
+            if (d >= 0x90 && d <= 0x9F) {          // U+0410..U+041F -> U+0430..U+043F
+                out += static_cast<char>(0xD0);
+                out += static_cast<char>(d + 0x20);
+            } else if (d >= 0xA0 && d <= 0xAF) {   // U+0420..U+042F -> U+0440..U+044F
+                out += static_cast<char>(0xD1);
+                out += static_cast<char>(d - 0x20);
+            } else if (d >= 0x80 && d <= 0x8F) {   // U+0400..U+040F -> U+0450..U+045F
+                out += static_cast<char>(0xD1);
+                out += static_cast<char>(d + 0x10);
+            } else {
+                out += static_cast<char>(c);
+                out += static_cast<char>(d);
+            }
+            ++i;
+        } else {
+            out += static_cast<char>(c);
+        }
+    }
+    return out;
+}
+
+// The score's words in the program language, for the helpers shared with it.
+std::string TranslateWords(const char* key, WaystoneHelper::Words::Args args) { return I18n::TrF(key, args); }
+const WaystoneHelper::Words& UiWords() {
+    static const WaystoneHelper::Words words{&TranslateWords};
+    return words;
+}
+
+// An affix's label in the program language with the table's numbers; the table's
+// English when no language file has it (Tr gives the key back).
+std::string AffixLabel(const WaystoneHelper::Affix& a) {
+    const char* text = I18n::Tr(a.LabelKey.c_str());
+    return a.LabelKey == text ? a.Label : WaystoneHelper::FillNumbers(text, a.Numbers);
+}
+
+// The first line of an affix label (lines are joined by " / ").
+std::string FirstLine(const std::string& label) {
+    const auto cut = label.find(" / ");
+    return cut == std::string::npos ? label : label.substr(0, cut);
+}
 
 // One-line summary of a border group's conditions.
 std::string RuleSummary(const WaystoneHelperConfig::BorderRule& r, const WaystoneHelper::WaystoneData& data) {
@@ -39,13 +119,14 @@ std::string RuleSummary(const WaystoneHelperConfig::BorderRule& r, const Wayston
     };
     for (const auto& g : data.GeneratedStats()) {
         const int min = r.StatMin(g.statId);
-        if (min > 0) add(g.displayName + " \xE2\x89\xA5 " + std::to_string(min));
+        if (min > 0)
+            add(I18n::TrF("rule_summary_stat", { { "stat", WaystoneHelper::StatNameText(UiWords(), g) }, { "min", Num(min) } }));
     }
-    if (r.minTier > 0) add("Tier \xE2\x89\xA5 " + std::to_string(r.minTier));
-    if (r.minAffixes > 0) add(std::to_string(r.minAffixes) + "+ affixes");
-    if (r.corrupted == WaystoneHelperConfig::kCorruptedOnly) add("Corrupted");
-    if (r.corrupted == WaystoneHelperConfig::kCorruptedNever) add("Not corrupted");
-    if (r.rarity >= 0) add(WaystoneHelper::RarityName(r.rarity));
+    if (r.minTier > 0) add(I18n::TrF("rule_summary_tier", { { "min", Num(r.minTier) } }));
+    if (r.minAffixes > 0) add(I18n::TrF("rule_summary_affixes", { { "min", Num(r.minAffixes) } }));
+    if (r.corrupted == WaystoneHelperConfig::kCorruptedOnly) add(I18n::Tr("breakdown_corrupted"));
+    if (r.corrupted == WaystoneHelperConfig::kCorruptedNever) add(I18n::Tr("breakdown_not_corrupted"));
+    if (r.rarity >= 0) add(WaystoneHelper::RarityText(UiWords(), r.rarity));
     return s;
 }
 
@@ -62,6 +143,17 @@ float GroupNameWidth() {
     return std::clamp(room, ImGui::GetFontSize() * 6.0f, ImGui::GetFontSize() * 20.0f);
 }
 
+// A group's name field: it shows the name as the overlay does (the plugin's own
+// default names in the program language); an edit stores what was typed.
+bool GroupNameField(std::string& name) {
+    std::string shown = WaystoneHelper::GroupNameText(UiWords(), name);
+    ImGui::SetNextItemWidth(GroupNameWidth());
+    if (!Ui::InputString("##name", I18n::Tr("group_name_hint"), shown)) return false;
+    TruncateUtf8(shown, WaystoneHelperConfig::kMaxNameLen);
+    name = std::move(shown);
+    return true;
+}
+
 // Icon buttons of a group title row; returns which was pressed (0 none, 1 up, 2 down, 3 delete).
 int GroupRowButtons(int index, int count) {
     ImGui::SameLine();
@@ -69,17 +161,19 @@ int GroupRowButtons(int index, int count) {
     int action = 0;
     ImGui::BeginDisabled(index == 0);
     if (Ui::SubtleButton(ICON_FA_CHEVRON_UP "###up")) action = 1;
-    Ui::Tip("Move up. The first matching group in the list wins.");
+    Ui::Tip(I18n::Tr("group_move_up_tip"));
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(index + 1 >= count);
     if (Ui::SubtleButton(ICON_FA_CHEVRON_DOWN "###down")) action = 2;
-    Ui::Tip("Move down.");
+    Ui::Tip(I18n::Tr("group_move_down_tip"));
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (Ui::SubtleButton(ICON_FA_TRASH_CAN "###del")) ImGui::OpenPopup("##confirmDelete");
-    Ui::Tip("Delete this group (asks first).");
-    if (Ui::ConfirmPopup("##confirmDelete", "Delete this group?", "Delete", "Keep")) action = 3;
+    Ui::Tip(I18n::Tr("group_delete_tip"));
+    if (Ui::ConfirmPopup("##confirmDelete", I18n::Tr("group_delete_confirm"), I18n::Tr("group_delete_yes"),
+                         I18n::Tr("group_delete_keep")))
+        action = 3;
     return action;
 }
 
@@ -134,7 +228,7 @@ void WaystonePlugin::DrawSettings() {
     ImGui::Spacing();
 
     if (ImGui::BeginTabBar("##tabs")) {
-        if (ImGui::BeginTabItem(ICON_FA_EYE "  Display###display")) {
+        if (ImGui::BeginTabItem(IconLabel(ICON_FA_EYE, I18n::Tr("tab_display"), "display").c_str())) {
             ImGui::Spacing();
             const bool table = Ui::WideEnoughForTwoColumns() &&
                                ImGui::BeginTable("##displayCols", 2, ImGuiTableFlags_SizingStretchSame);
@@ -148,15 +242,15 @@ void WaystonePlugin::DrawSettings() {
             if (table) ImGui::EndTable();
             ImGui::EndTabItem();
         }
-        const std::string borders = std::string(ICON_FA_SQUARE "  Border groups (") +
-                                    std::to_string(m_settings.borderRules.size()) + ")###borders";
+        const std::string borders = IconLabel(
+            ICON_FA_SQUARE, I18n::TrF("tab_borders", { { "count", Num(m_settings.borderRules.size()) } }), "borders");
         if (ImGui::BeginTabItem(borders.c_str())) {
             ImGui::Spacing();
             DrawSectionBorders();
             ImGui::EndTabItem();
         }
-        const std::string groups = std::string(ICON_FA_LAYER_GROUP "  Affix groups (") +
-                                   std::to_string(m_settings.affixGroups.size()) + ")###groups";
+        const std::string groups = IconLabel(
+            ICON_FA_LAYER_GROUP, I18n::TrF("tab_groups", { { "count", Num(m_settings.affixGroups.size()) } }), "groups");
         if (ImGui::BeginTabItem(groups.c_str())) {
             ImGui::Spacing();
             DrawSectionAffixGroups();
@@ -178,38 +272,30 @@ void WaystonePlugin::DrawSettings() {
 // Status card: what the plugin does, whether the overlay is shown, Reset display.
 void WaystonePlugin::DrawHeader() {
     Ui::BeginCard("##status");
-    Ui::Heading(ICON_FA_MAP, "Waystones",
-                "Waystones in your inventory, stash and guild stash get badges: the affix count in the "
-                "top-left corner, map-stat totals in the top-right corner and matching affix groups on "
-                "the left. Border groups colour the frame of waystones that meet your conditions.\n\n"
-                "Hover a marked waystone for a breakdown of what it matched.");
-    if (m_overlayHidden) {
-        const std::string hint = std::string("Press ") + Ui::KeyName(m_settings.toggleOverlayVk) +
-                                 " in game to show the badges again.";
-        Ui::Hint(hint.c_str());
-    } else {
-        Ui::Hint("Waystones are marked in your inventory, stash and guild stash.");
-    }
+    Ui::Heading(ICON_FA_MAP, I18n::Tr("header_title"), I18n::Tr("header_help"));
+    if (m_overlayHidden)
+        Ui::Hint(I18n::TrF("header_hidden_hint", { { "key", Ui::KeyName(m_settings.toggleOverlayVk) } }).c_str());
+    else
+        Ui::Hint(I18n::Tr("header_hint"));
     ImGui::Spacing();
 
     const Ui::Palette pal = Ui::Colors();
     if (m_overlayHidden)
-        Ui::StatusPill("Hidden by the hotkey", ImGui::ColorConvertFloat4ToU32(pal.Warning));
+        Ui::StatusPill(I18n::Tr("header_hidden"), ImGui::ColorConvertFloat4ToU32(pal.Warning));
     else
-        Ui::StatusPill("Overlay active", ImGui::ColorConvertFloat4ToU32(pal.Success));
-    Ui::Tip("The toggle hotkey (Display tab) hides or shows every badge at once.");
+        Ui::StatusPill(I18n::Tr("header_active"), ImGui::ColorConvertFloat4ToU32(pal.Success));
+    Ui::Tip(I18n::Tr("header_pill_tip"));
 
-    const char* resetLabel = ICON_FA_ROTATE_LEFT "  Reset display###resetDisplay";
-    const float w = Ui::ButtonWidth(resetLabel);
+    const std::string resetLabel = IconLabel(ICON_FA_ROTATE_LEFT, I18n::Tr("header_reset"), "resetDisplay");
+    const float w = Ui::ButtonWidth(resetLabel.c_str());
     ImGui::SameLine();
     // On a narrow pane the button takes its own line instead of running off the edge.
     if (ImGui::GetContentRegionAvail().x < w) ImGui::NewLine();
     Ui::AlignRight(w);
-    if (Ui::SubtleButton(resetLabel)) ImGui::OpenPopup("##resetDisplayConfirm");
-    Ui::Tip("Restores badge, colour and overlay defaults.\nBorder groups, affix groups and the hotkey are kept.");
-    if (Ui::ConfirmPopup("##resetDisplayConfirm",
-                         "Reset the display settings? Your border groups, affix groups and hotkey stay.", "Reset",
-                         "Cancel")) {
+    if (Ui::SubtleButton(resetLabel.c_str())) ImGui::OpenPopup("##resetDisplayConfirm");
+    Ui::Tip(I18n::Tr("header_reset_tip"));
+    if (Ui::ConfirmPopup("##resetDisplayConfirm", I18n::Tr("header_reset_confirm"), I18n::Tr("header_reset_yes"),
+                         I18n::Tr("header_reset_no"))) {
         m_settings.ResetDisplay();
         SettingsChanged(false);
     }
@@ -224,41 +310,42 @@ void WaystonePlugin::DrawSectionOverlay() {
     auto& s = m_settings;
     bool changed = false;
     Ui::BeginCard("##overlay");
-    Ui::Heading(ICON_FA_EYE, "Overlay");
+    Ui::Heading(ICON_FA_EYE, I18n::Tr("overlay_title"));
     {
-        const Ui::LabelColumn col({"Toggle hotkey", "Badge size", "Badge background", "Refresh every"});
-        col.RowNoWidth("Toggle hotkey");
-        if (Ui::HotkeyCapture("##hotkey", &s.toggleOverlayVk,
-                              "Press this key in game to hide or show all badges at once,\n"
-                              "e.g. to see the game's own highlight while using currency on maps.\n"
-                              "Click, then press the key you want (Esc cancels)."))
+        const char* hotkeyLabel = I18n::Tr("overlay_hotkey");
+        const char* sizeLabel = I18n::Tr("overlay_badge_size");
+        const char* backgroundLabel = I18n::Tr("overlay_badge_background");
+        const char* refreshLabel = I18n::Tr("overlay_refresh");
+        const Ui::LabelColumn col({hotkeyLabel, sizeLabel, backgroundLabel, refreshLabel});
+        col.RowNoWidth(hotkeyLabel);
+        if (Ui::HotkeyCapture("##hotkey", &s.toggleOverlayVk, I18n::Tr("overlay_hotkey_tip")))
             changed = true;
 
-        col.Row("Badge size");
+        col.Row(sizeLabel);
         int pct = static_cast<int>(std::lround(s.badgeScale * 100.0f));
+        const std::string pctFormat = NumberFormat(I18n::TrF("unit_percent", { { "value", kValue } }));
         if (ImGui::SliderInt("##badgeScale", &pct, static_cast<int>(WaystoneHelperConfig::kBadgeScaleMin * 100),
-                             static_cast<int>(WaystoneHelperConfig::kBadgeScaleMax * 100), "%d%%",
+                             static_cast<int>(WaystoneHelperConfig::kBadgeScaleMax * 100), pctFormat.c_str(),
                              ImGuiSliderFlags_AlwaysClamp)) {
             s.badgeScale = static_cast<float>(pct) / 100.0f;
             changed = true;
         }
-        Ui::Tip("Size of the badge text, relative to the overlay font.\nThe badges always stay inside their waystone.");
+        Ui::Tip(I18n::Tr("overlay_badge_size_tip"));
 
-        col.RowNoWidth("Badge background");
+        col.RowNoWidth(backgroundLabel);
         changed |= Ui::Swatch("##badgeBg", s.badgeBackgroundColor);
-        Ui::Tip("Fill behind every badge.\nLower the alpha to see more of the item art.");
+        Ui::Tip(I18n::Tr("overlay_badge_background_tip"));
 
-        col.Row("Refresh every");
+        col.Row(refreshLabel);
+        const std::string msFormat = NumberFormat(I18n::TrF("unit_ms", { { "value", kValue } }));
         changed |= ImGui::SliderInt("##scanInterval", &s.scanIntervalMs, WaystoneHelperConfig::kScanIntervalMinMs,
-                                    WaystoneHelperConfig::kScanIntervalMaxMs, "%d ms", ImGuiSliderFlags_AlwaysClamp);
-        Ui::Tip("How often the open windows are checked for waystones.\nLower = badges follow tab switches faster;\n"
-                "higher = less work for the overlay.");
+                                    WaystoneHelperConfig::kScanIntervalMaxMs, msFormat.c_str(), ImGuiSliderFlags_AlwaysClamp);
+        Ui::Tip(I18n::Tr("overlay_refresh_tip"));
     }
-    changed |= Ui::Check("Hide badges on the hovered waystone", "hideHovered", &s.hideWhenHovered,
-                         "Keeps the waystone under the cursor clean so the game's own\ntooltip and highlight stay readable.");
-    changed |= Ui::Check("Show the breakdown panel on hover", "breakdown", &s.showHoverBreakdown,
-                         "A panel beside a marked waystone lists its affix count, map stats,\n"
-                         "matching affix groups and the border group that coloured it.");
+    changed |= Ui::Check(I18n::Tr("overlay_hide_hovered"), "hideHovered", &s.hideWhenHovered,
+                         I18n::Tr("overlay_hide_hovered_tip"));
+    changed |= Ui::Check(I18n::Tr("overlay_breakdown"), "breakdown", &s.showHoverBreakdown,
+                         I18n::Tr("overlay_breakdown_tip"));
     Ui::EndCard();
     if (changed) SettingsChanged(false);
 }
@@ -267,21 +354,22 @@ void WaystonePlugin::DrawSectionAffixCount() {
     auto& s = m_settings;
     bool changed = false;
     Ui::BeginCard("##affixCount");
-    Ui::Heading(ICON_FA_HASHTAG, "Affix count");
-    changed |= Ui::Check("Show the affix-count badge", "affixBadge", &s.showAffixCountBadge,
-                         "A badge in the top-left corner with the number of explicit affixes,\n"
-                         "shown once the waystone has at least the count below.");
+    Ui::Heading(ICON_FA_HASHTAG, I18n::Tr("count_title"));
+    changed |= Ui::Check(I18n::Tr("count_show_badge"), "affixBadge", &s.showAffixCountBadge,
+                         I18n::Tr("count_show_badge_tip"));
     ImGui::BeginDisabled(!s.showAffixCountBadge);
     {
-        const Ui::LabelColumn col({"Show from", "Badge colour"});
-        col.Row("Show from");
+        const char* fromLabel = I18n::Tr("count_show_from");
+        const char* colourLabel = I18n::Tr("count_badge_colour");
+        const Ui::LabelColumn col({fromLabel, colourLabel});
+        col.Row(fromLabel);
+        const std::string fmt = NumberFormat(I18n::TrF("count_format", { { "value", kValue } }));
         changed |= ImGui::SliderInt("##target", &s.targetAffixCount, WaystoneHelperConfig::kTargetAffixMin,
-                                    WaystoneHelperConfig::kTargetAffixMax, s.targetAffixCount == 1 ? "%d affix" : "%d affixes",
-                                    ImGuiSliderFlags_AlwaysClamp);
-        Ui::Tip("The smallest affix count that gets a badge.\n0-2 also marks normal and magic waystones.");
-        col.RowNoWidth("Badge colour");
+                                    WaystoneHelperConfig::kTargetAffixMax, fmt.c_str(), ImGuiSliderFlags_AlwaysClamp);
+        Ui::Tip(I18n::Tr("count_show_from_tip"));
+        col.RowNoWidth(colourLabel);
         changed |= Ui::Swatch("##affixColor", s.affixCountBadgeColor);
-        Ui::Tip("Text and frame colour of the affix-count badge.");
+        Ui::Tip(I18n::Tr("count_badge_colour_tip"));
     }
     ImGui::EndDisabled();
     Ui::EndCard();
@@ -292,18 +380,16 @@ void WaystonePlugin::DrawSectionMapStats() {
     auto& s = m_settings;
     bool changed = false;
     Ui::BeginCard("##mapStats");
-    Ui::Heading(ICON_FA_LIST_CHECK, "Map stats",
-                "Badges in the top-right corner with the waystone's total of a map stat,\n"
-                "e.g. R65 = 65% more Rarity of Items. Borders based on these totals\n"
-                "are set up under Border groups.");
-    changed |= Ui::Check("Show map-stat badges", "statBadges", &s.highlightImportantAffixes,
-                         "Draws a badge for each stat ticked below.");
+    Ui::Heading(ICON_FA_LIST_CHECK, I18n::Tr("stats_title"), I18n::Tr("stats_help"));
+    changed |= Ui::Check(I18n::Tr("stats_show_badges"), "statBadges", &s.highlightImportantAffixes,
+                         I18n::Tr("stats_show_badges_tip"));
     ImGui::BeginDisabled(!s.highlightImportantAffixes);
     // One column for the swatches: the widest "Name (code)" checkbox.
     float widest = 0.0f;
     std::vector<std::string> labels;
     for (const auto& g : m_data.GeneratedStats()) {
-        labels.push_back(g.displayName + " (" + g.badgeLabel + ")");
+        labels.push_back(I18n::TrF("stats_name_code", { { "name", WaystoneHelper::StatNameText(UiWords(), g) },
+                                                        { "code", g.badgeLabel } }));
         widest = std::max(widest, ImGui::CalcTextSize(labels.back().c_str()).x);
     }
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -317,11 +403,11 @@ void WaystonePlugin::DrawSectionMapStats() {
         ImGui::PushID(static_cast<int>(i));
         ImGui::SetCursorPosX(x0);
         changed |= ImGui::Checkbox((labels[i] + "###show").c_str(), show);
-        Ui::Tip("Show a badge with this stat's total.");
+        Ui::Tip(I18n::Tr("stats_show_tip"));
         ImGui::SameLine();
         ImGui::SetCursorPosX(swatchX);
         changed |= Ui::Swatch("##color", color);
-        Ui::Tip("Badge colour of this stat.");
+        Ui::Tip(I18n::Tr("stats_colour_tip"));
         ImGui::PopID();
     }
     ImGui::EndDisabled();
@@ -337,33 +423,29 @@ void WaystonePlugin::DrawSectionBorders() {
     auto& s = m_settings;
     bool changed = false;
     Ui::BeginCard("##bordersCard");
-    Ui::Heading(ICON_FA_SQUARE, "Border groups",
-                "Each group colours the border of waystones that meet ALL of its conditions:\n"
-                "map-stat totals, tier, affix count, corruption and rarity.\n"
-                "Conditions left at Any are ignored. The first matching group in the\n"
-                "list wins, and a group without conditions never matches.");
-    changed |= Ui::Check("Draw borders", "drawBorders", &s.borderEnabled, "Turns every border group on or off.");
+    Ui::Heading(ICON_FA_SQUARE, I18n::Tr("borders_title"), I18n::Tr("borders_help"));
+    changed |= Ui::Check(I18n::Tr("borders_draw"), "drawBorders", &s.borderEnabled, I18n::Tr("borders_draw_tip"));
     ImGui::BeginDisabled(!s.borderEnabled);
     {
-        const Ui::LabelColumn col({"Border thickness"});
-        changed |= Ui::SliderIntRow(col, "Border thickness", "##thickness", &s.borderThickness,
+        const char* thicknessLabel = I18n::Tr("borders_thickness");
+        const Ui::LabelColumn col({thicknessLabel});
+        const std::string pxFormat = NumberFormat(I18n::TrF("unit_px", { { "value", kValue } }));
+        changed |= Ui::SliderIntRow(col, thicknessLabel, "##thickness", &s.borderThickness,
                                     WaystoneHelperConfig::kBorderThicknessMin, WaystoneHelperConfig::kBorderThicknessMax,
-                                    "%d px", "Width of the border, drawn inside the item's cell.");
+                                    pxFormat.c_str(), I18n::Tr("borders_thickness_tip"));
     }
     ImGui::Spacing();
     ImGui::BeginDisabled(s.borderRules.size() >= WaystoneHelperConfig::kMaxGroups);
-    if (ImGui::Button(ICON_FA_PLUS "  Add border group###addRule")) {
+    if (ImGui::Button(IconLabel(ICON_FA_PLUS, I18n::Tr("borders_add"), "addRule").c_str())) {
         WaystoneHelperConfig::BorderRule r;
         r.id = s.MakeId("b");
-        r.name = "Group " + std::to_string(s.borderRules.size() + 1);
+        r.name = I18n::TrF("group_name_numbered", { { "number", Num(s.borderRules.size() + 1) } });
         s.borderRules.push_back(std::move(r));
         changed = true;
     }
-    Ui::Tip("Adds a group at the end of the list.");
+    Ui::Tip(I18n::Tr("group_add_tip"));
     ImGui::EndDisabled();
-    if (s.borderRules.empty())
-        Ui::Hint("No groups yet. Example: Item Rarity at least 60 with a red border, and "
-                 "Waystone Drop Chance at least 120 with a green one.");
+    if (s.borderRules.empty()) Ui::Hint(I18n::Tr("borders_empty_hint"));
     ImGui::EndDisabled();   // a disabled scope never crosses a card (child window) edge
     Ui::EndCard();
 
@@ -385,23 +467,19 @@ bool WaystonePlugin::DrawBorderRule(int index, int count) {
 
     // Title row: on/off, colour, name, move and delete.
     changed |= ImGui::Checkbox("##enabled", &r.enabled);
-    Ui::Tip("Turns this group on or off.");
+    Ui::Tip(I18n::Tr("group_enabled_tip"));
     ImGui::SameLine();
     changed |= Ui::Swatch("##color", r.color);
-    Ui::Tip("Border colour of this group.");
+    Ui::Tip(I18n::Tr("rule_colour_tip"));
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(GroupNameWidth());
-    if (Ui::InputString("##name", "Group name", r.name)) {
-        TruncateUtf8(r.name, WaystoneHelperConfig::kMaxNameLen);
-        changed = true;
-    }
+    changed |= GroupNameField(r.name);
     const int action = GroupRowButtons(index, count);
 
     const std::string summary = RuleSummary(r, m_data);
     if (summary.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, Ui::Colors().Warning);
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextUnformatted("No conditions yet: this group never matches.");
+        ImGui::TextUnformatted(I18n::Tr("rule_no_conditions"));
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
     } else {
@@ -409,48 +487,57 @@ bool WaystonePlugin::DrawBorderRule(int index, int count) {
     }
 
     ImGui::BeginDisabled(!r.enabled);
-    if (ImGui::TreeNodeEx("Conditions###cond", ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::TreeNodeEx(I18n::TrId("rule_conditions"), ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen)) {
         std::vector<std::string> statLabels;
         std::vector<const char*> keys;
-        for (const auto& g : m_data.GeneratedStats()) statLabels.push_back(g.displayName + " at least");
+        for (const auto& g : m_data.GeneratedStats())
+            statLabels.push_back(I18n::TrF("rule_stat_at_least", { { "stat", WaystoneHelper::StatNameText(UiWords(), g) } }));
         for (const auto& l : statLabels) keys.push_back(l.c_str());
-        keys.push_back("Tier at least");
-        keys.push_back("Affixes at least");
-        keys.push_back("Corruption");
-        keys.push_back("Rarity");
+        const char* tierLabel = I18n::Tr("rule_tier_at_least");
+        const char* affixesLabel = I18n::Tr("rule_affixes_at_least");
+        const char* corruptionLabel = I18n::Tr("rule_corruption");
+        const char* rarityLabel = I18n::Tr("rule_rarity");
+        keys.push_back(tierLabel);
+        keys.push_back(affixesLabel);
+        keys.push_back(corruptionLabel);
+        keys.push_back(rarityLabel);
         const Ui::LabelColumn col(keys);
+        const std::string anyFormat = NumberFormat(I18n::Tr("rule_any"));
         const auto& stats = m_data.GeneratedStats();
         for (std::size_t i = 0; i < stats.size(); ++i) {
             ImGui::PushID(static_cast<int>(i));
             col.Row(statLabels[i].c_str());
             int v = r.StatMin(stats[i].statId);
-            if (DrawMinInput("##stat", &v, WaystoneHelperConfig::kStatThresholdMax, "Any")) {
+            if (DrawMinInput("##stat", &v, WaystoneHelperConfig::kStatThresholdMax, anyFormat.c_str())) {
                 if (v > 0) r.statMins[stats[i].statId] = v;
                 else r.statMins.erase(stats[i].statId);
                 changed = true;
             }
-            Ui::Tip("The waystone's total of this map stat must be at least this much.\n"
-                    "Drag, or double-click to type (Enter confirms). 0 = any.");
+            Ui::Tip(I18n::Tr("rule_stat_tip"));
             ImGui::PopID();
         }
-        col.Row("Tier at least");
+        col.Row(tierLabel);
+        const std::string tierFormat = NumberFormat(I18n::TrF("rule_tier_format", { { "value", kValue } }));
         changed |= ImGui::SliderInt("##tier", &r.minTier, 0, WaystoneHelperConfig::kMinTierMax,
-                                    r.minTier == 0 ? "Any" : "Tier %d", ImGuiSliderFlags_AlwaysClamp);
-        Ui::Tip("Lowest waystone tier that matches. Any = every tier.");
-        col.Row("Affixes at least");
+                                    r.minTier == 0 ? anyFormat.c_str() : tierFormat.c_str(), ImGuiSliderFlags_AlwaysClamp);
+        Ui::Tip(I18n::Tr("rule_tier_tip"));
+        col.Row(affixesLabel);
         changed |= ImGui::SliderInt("##affixes", &r.minAffixes, 0, WaystoneHelperConfig::kTargetAffixMax,
-                                    r.minAffixes == 0 ? "Any" : "%d", ImGuiSliderFlags_AlwaysClamp);
-        Ui::Tip("Lowest number of explicit affixes that matches. Any = no limit.");
-        col.Row("Corruption");
-        changed |= Ui::Combo("##corruption", r.corrupted, kCorruptionItems, 3);
-        Ui::Tip("Corrupted only, not corrupted only, or either.");
-        col.Row("Rarity");
+                                    r.minAffixes == 0 ? anyFormat.c_str() : "%d", ImGuiSliderFlags_AlwaysClamp);
+        Ui::Tip(I18n::Tr("rule_affixes_tip"));
+        col.Row(corruptionLabel);
+        const char* corruptionItems[] = {I18n::Tr("rule_any"), I18n::Tr("corruption_only"), I18n::Tr("corruption_never")};
+        changed |= Ui::Combo("##corruption", r.corrupted, corruptionItems, 3);
+        Ui::Tip(I18n::Tr("rule_corruption_tip"));
+        col.Row(rarityLabel);
+        const char* rarityItems[] = {I18n::Tr("rule_any"), I18n::Tr("rarity_normal"), I18n::Tr("rarity_magic"),
+                                     I18n::Tr("rarity_rare"), I18n::Tr("rarity_unique")};
         int rarityIndex = std::clamp(r.rarity + 1, 0, 4);
-        if (Ui::Combo("##rarity", rarityIndex, kRarityItems, 5)) {
+        if (Ui::Combo("##rarity", rarityIndex, rarityItems, 5)) {
             r.rarity = rarityIndex - 1;
             changed = true;
         }
-        Ui::Tip("Only waystones of this rarity match. Any = every rarity.");
+        Ui::Tip(I18n::Tr("rule_rarity_tip"));
         ImGui::TreePop();
     }
     ImGui::EndDisabled();
@@ -473,28 +560,24 @@ void WaystonePlugin::DrawSectionAffixGroups() {
     auto& s = m_settings;
     bool changed = false;
     Ui::BeginCard("##groupsCard");
-    Ui::Heading(ICON_FA_LAYER_GROUP, "Affix groups",
-                "A group is a set of waystone affixes you care about. A waystone matches\n"
-                "when it has at least the chosen number of them, and gets a badge on\n"
-                "the left in the group's colour: matched/selected, e.g. 2/3.");
-    changed |= Ui::Check("Match affix groups", "matchGroups", &s.enableAffixGroups,
-                         "Checks every waystone against the groups below.");
+    Ui::Heading(ICON_FA_LAYER_GROUP, I18n::Tr("groups_title"), I18n::Tr("groups_help"));
+    changed |= Ui::Check(I18n::Tr("groups_match"), "matchGroups", &s.enableAffixGroups, I18n::Tr("groups_match_tip"));
     ImGui::BeginDisabled(!s.enableAffixGroups);
-    changed |= Ui::Check("Show group badges", "groupBadges", &s.showAffixGroupBadges,
-                         "Off: matches only appear in the hover breakdown.");
+    changed |= Ui::Check(I18n::Tr("groups_badges"), "groupBadges", &s.showAffixGroupBadges,
+                         I18n::Tr("groups_badges_tip"));
     ImGui::Spacing();
     ImGui::BeginDisabled(s.affixGroups.size() >= WaystoneHelperConfig::kMaxGroups);
-    if (ImGui::Button(ICON_FA_PLUS "  Add affix group###addGroup")) {
+    if (ImGui::Button(IconLabel(ICON_FA_PLUS, I18n::Tr("groups_add"), "addGroup").c_str())) {
         WaystoneHelperConfig::AffixGroup g;
         g.id = s.MakeId("g");
-        g.name = "Group " + std::to_string(s.affixGroups.size() + 1);
+        g.name = I18n::TrF("group_name_numbered", { { "number", Num(s.affixGroups.size() + 1) } });
         s.affixGroups.push_back(std::move(g));
         changed = true;
     }
-    Ui::Tip("Adds a group at the end of the list.");
+    Ui::Tip(I18n::Tr("group_add_tip"));
     ImGui::EndDisabled();
-    if (s.affixGroups.empty()) Ui::Hint("No groups yet. Example: a group of the curse suffixes to spot maps you skip.");
-    if (!m_data.Loaded()) Ui::Hint("The built-in affix table is not available, so groups cannot match.");
+    if (s.affixGroups.empty()) Ui::Hint(I18n::Tr("groups_empty_hint"));
+    if (!m_data.Loaded()) Ui::Hint(I18n::Tr("groups_no_table"));
     ImGui::EndDisabled();   // a disabled scope never crosses a card (child window) edge
     Ui::EndCard();
 
@@ -515,31 +598,28 @@ bool WaystonePlugin::DrawAffixGroup(int index, int count) {
     Ui::BeginCard("##group");
 
     changed |= ImGui::Checkbox("##enabled", &g.enabled);
-    Ui::Tip("Turns this group on or off.");
+    Ui::Tip(I18n::Tr("group_enabled_tip"));
     ImGui::SameLine();
     changed |= Ui::Swatch("##color", g.color);
-    Ui::Tip("Badge colour of this group.");
+    Ui::Tip(I18n::Tr("group_colour_tip"));
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(GroupNameWidth());
-    if (Ui::InputString("##name", "Group name", g.name)) {
-        TruncateUtf8(g.name, WaystoneHelperConfig::kMaxNameLen);
-        changed = true;
-    }
+    changed |= GroupNameField(g.name);
     const int action = GroupRowButtons(index, count);
 
     ImGui::BeginDisabled(!g.enabled);
     {
-        const Ui::LabelColumn col({"Match when"});
-        col.Row("Match when");
+        const char* matchLabel = I18n::Tr("group_match_when");
+        const Ui::LabelColumn col({matchLabel});
+        col.Row(matchLabel);
         const int selected = static_cast<int>(g.selectedAffixIds.size());
-        char fmt[64];
-        std::snprintf(fmt, sizeof(fmt), "at least %%d of %d selected", selected);
-        changed |= ImGui::SliderInt("##minMatched", &g.minMatched, 1, WaystoneHelperConfig::kMinMatchedAffixMax, fmt,
-                                    ImGuiSliderFlags_AlwaysClamp);
-        Ui::Tip("How many of the selected affixes a waystone needs to match this group.");
+        const std::string fmt =
+            NumberFormat(I18n::TrF("group_match_format", { { "value", kValue }, { "total", Num(selected) } }));
+        changed |= ImGui::SliderInt("##minMatched", &g.minMatched, 1, WaystoneHelperConfig::kMinMatchedAffixMax,
+                                    fmt.c_str(), ImGuiSliderFlags_AlwaysClamp);
+        Ui::Tip(I18n::Tr("group_match_tip"));
     }
-    if (ImGui::TreeNodeEx("Affixes###affixes", ImGuiTreeNodeFlags_SpanAvailWidth |
-                                               (g.selectedAffixIds.empty() ? ImGuiTreeNodeFlags_DefaultOpen : 0))) {
+    if (ImGui::TreeNodeEx(I18n::TrId("group_affixes"), ImGuiTreeNodeFlags_SpanAvailWidth |
+                                                          (g.selectedAffixIds.empty() ? ImGuiTreeNodeFlags_DefaultOpen : 0))) {
         const size_t before = g.selectedAffixIds.size();
         DrawAffixPicker(g);
         changed |= before != g.selectedAffixIds.size();
@@ -563,20 +643,21 @@ bool WaystonePlugin::DrawAffixGroup(int index, int count) {
 
 void WaystonePlugin::DrawAffixPicker(WaystoneHelperConfig::AffixGroup& g) {
     std::string& search = m_affixSearch[g.id];
-    const char* clearLabel = "Clear selection###clearSel";
+    const char* clearLabel = I18n::TrId("picker_clear");
     const float clearW = Ui::ButtonWidth(clearLabel);
     const float fieldW = ImGui::GetContentRegionAvail().x - clearW - ImGui::GetStyle().ItemSpacing.x;
     // The field gets its own line when the row is too narrow for a useful one.
     const bool stacked = fieldW < ImGui::GetFontSize() * 10.0f;
     ImGui::SetNextItemWidth(stacked ? ImGui::GetContentRegionAvail().x : fieldW);
-    Ui::InputString("##filter", ICON_FA_MAGNIFYING_GLASS "  Filter affixes", search);
-    Ui::Tip("Type part of an affix or category name.");
+    const std::string filterHint = std::string(ICON_FA_MAGNIFYING_GLASS "  ") + I18n::Tr("picker_filter_hint");
+    Ui::InputString("##filter", filterHint.c_str(), search);
+    Ui::Tip(I18n::Tr("picker_filter_tip"));
     if (!stacked) ImGui::SameLine();
     ImGui::BeginDisabled(g.selectedAffixIds.empty());
     if (Ui::SubtleButton(clearLabel)) g.selectedAffixIds.clear();
-    Ui::Tip("Unticks every affix of this group.");
+    Ui::Tip(I18n::Tr("picker_clear_tip"));
     ImGui::EndDisabled();
-    const std::string filter = WaystoneHelper::ToLowerCopy(search);
+    const std::string filter = FoldCase(search);
 
     const float listH = std::floor(ImGui::GetTextLineHeightWithSpacing() * 12.0f);
     ImGui::BeginChild("##affixList", ImVec2(0.0f, listH), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
@@ -585,12 +666,15 @@ void WaystonePlugin::DrawAffixPicker(WaystoneHelperConfig::AffixGroup& g) {
     bool open = false;
     int shown = 0;
     for (const auto& a : m_data.Affixes()) {
-        if (!filter.empty() && !WaystoneHelper::ContainsCI(a.Label, filter) && !WaystoneHelper::ContainsCI(a.Category, filter))
+        const std::string label = AffixLabel(a);
+        const char* categoryText = I18n::Tr(WaystoneHelper::CategoryKey(a.Category));
+        if (!filter.empty() && FoldCase(label).find(filter) == std::string::npos &&
+            FoldCase(a.Label).find(filter) == std::string::npos && FoldCase(categoryText).find(filter) == std::string::npos)
             continue;
         if (a.Category != category) {
             if (open) ImGui::EndTable();
             category = a.Category;
-            ImGui::SeparatorText(category.empty() ? "Other" : category.c_str());
+            ImGui::SeparatorText(categoryText);
             open = ImGui::BeginTable(("##cat" + category).c_str(), columns, ImGuiTableFlags_SizingStretchSame);
         }
         if (!open) continue;
@@ -600,18 +684,19 @@ void WaystonePlugin::DrawAffixPicker(WaystoneHelperConfig::AffixGroup& g) {
         ImGui::PushID(a.Id.c_str());
         // A name too long for its column ends in "..." (only rows on screen are
         // measured); the tooltip has the whole affix.
+        const std::string shortText = FirstLine(label);
         const float rowW = ImGui::GetContentRegionAvail().x;
         const bool visible = ImGui::IsRectVisible(ImVec2(rowW, ImGui::GetFrameHeight()));
         const std::string fitted =
-            visible ? FitWithEllipsis(a.Short, rowW - ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x)
-                    : a.Short;
+            visible ? FitWithEllipsis(shortText, rowW - ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x)
+                    : shortText;
         if (ImGui::Checkbox((fitted + "###on").c_str(), &on) && on != was) {
             if (on) g.selectedAffixIds.push_back(a.Id);
             else g.selectedAffixIds.erase(std::remove(g.selectedAffixIds.begin(), g.selectedAffixIds.end(), a.Id),
                                           g.selectedAffixIds.end());
         }
-        if (a.Label != a.Short || fitted != a.Short) {
-            std::string full = a.Label;
+        if (label != shortText || fitted != shortText) {
+            std::string full = label;
             for (std::size_t p = full.find(" / "); p != std::string::npos; p = full.find(" / ", p + 1))
                 full.replace(p, 3, "\n");
             Ui::Tip(full.c_str());
@@ -620,7 +705,11 @@ void WaystonePlugin::DrawAffixPicker(WaystoneHelperConfig::AffixGroup& g) {
         ++shown;
     }
     if (open) ImGui::EndTable();
-    if (shown == 0) ImGui::TextDisabled("No affixes match the filter.");
+    if (shown == 0) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextUnformatted(I18n::Tr("picker_no_match"));
+        ImGui::PopStyleColor();
+    }
     ImGui::EndChild();
 }
 
@@ -629,65 +718,87 @@ void WaystonePlugin::DrawAffixPicker(WaystoneHelperConfig::AffixGroup& g) {
 // ---------------------------------------------------------------------------
 
 void WaystonePlugin::DrawSectionDiagnostics() {
-    if (!Ui::BeginDiagnostics("Refresh timings, reading item mods, the game's map-stat keys and a dump of the "
-                              "waystones on screen."))
-        return;
+    if (!Ui::BeginDiagnostics(I18n::Tr("diag_tip"))) return;
     const Ui::Palette pal = Ui::Colors();
-    WrappedDisabled(m_dataStatus);
-    char buf[192];
-    std::snprintf(buf, sizeof(buf), "Last refresh: %d waystones on screen, %d read, %d waiting  \xC2\xB7  %.2f ms (avg %.2f ms)",
-                  m_lastStats.visible, m_lastStats.parsed, m_lastStats.deferred, m_lastStats.ms, m_scanMsAvg);
+    WrappedDisabled(m_data.Loaded() ? I18n::TrF("diag_table", { { "affixes", Num(m_data.Affixes().size()) },
+                                                                { "mods", Num(m_data.ModCount()) } })
+                                    : std::string(I18n::Tr("diag_table_failed")));
+    const std::string refresh =
+        I18n::TrF("diag_last_refresh", { { "visible", Num(m_lastStats.visible) },
+                                         { "read", Num(m_lastStats.parsed) },
+                                         { "waiting", Num(m_lastStats.deferred) } }) +
+        "  \xC2\xB7  " + I18n::TrF("diag_refresh_time", { { "ms", Num2(m_lastStats.ms) }, { "avg", Num2(m_scanMsAvg) } });
     ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextUnformatted(buf);
+    ImGui::TextUnformatted(refresh.c_str());
     ImGui::PopTextWrapPos();
-    if (!m_settingsNote.empty()) Ui::Hint(m_settingsNote.c_str());
+    switch (m_settingsNoteKind) {
+    case WaystoneHelperConfig::LoadNote::UnreadableKept: Ui::Hint(I18n::Tr("diag_note_unreadable_kept")); break;
+    case WaystoneHelperConfig::LoadNote::Unreadable:     Ui::Hint(I18n::Tr("diag_note_unreadable")); break;
+    case WaystoneHelperConfig::LoadNote::Damaged:        Ui::Hint(I18n::Tr("diag_note_damaged")); break;
+    case WaystoneHelperConfig::LoadNote::LegacyBorder:
+        Ui::Hint(I18n::TrF("diag_note_legacy_border", { { "name", I18n::Tr("group_name_border") } }).c_str());
+        break;
+    case WaystoneHelperConfig::LoadNote::None: break;
+    }
 
     ImGui::Spacing();
     bool readMods = m_settings.readMods;
-    if (Ui::Check("Read item mods", "readMods", &readMods,
-                  "Reads each waystone's mods for the affix count, map stats and affix groups.\n"
-                  "Off: only tier, rarity and corruption conditions work.")) {
+    if (Ui::Check(I18n::Tr("diag_read_mods"), "readMods", &readMods, I18n::Tr("diag_read_mods_tip"))) {
         m_settings.readMods = readMods;
         SettingsChanged(true);
     }
 
     ImGui::Spacing();
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Map-stat keys");
-    Ui::HelpMarker("The game's numbers for the map stats inside an item. A game patch can move\n"
-                   "them; the plugin then finds the new numbers from the waystones you look at\n"
-                   "and switches to them by itself (it needs a few waystones carrying each stat).");
-    if (!m_calibrationNote.empty()) Ui::Hint(m_calibrationNote.c_str());
+    ImGui::TextUnformatted(I18n::Tr("diag_keys_title"));
+    Ui::HelpMarker(I18n::Tr("diag_keys_help"));
+    const auto& stats = m_data.GeneratedStats();
+    if (!m_calibrationChanges.empty()) {
+        std::string changes;
+        for (const auto& c : m_calibrationChanges) {
+            if (c.stat >= stats.size()) continue;
+            if (!changes.empty()) changes += ", ";
+            changes += I18n::TrF("diag_key_change", { { "stat", WaystoneHelper::StatNameText(UiWords(), stats[c.stat]) },
+                                                      { "from", Num(c.from) },
+                                                      { "to", Num(c.to) } });
+        }
+        Ui::Hint(I18n::TrF("diag_keys_updated", { { "changes", changes } }).c_str());
+    }
     if (ImGui::BeginTable("##keys", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_PadOuterX)) {
-        ImGui::TableSetupColumn("Stat");
-        ImGui::TableSetupColumn("Key");
-        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(I18n::TrId("diag_col_stat"));
+        ImGui::TableSetupColumn(I18n::TrId("diag_col_key"));
+        ImGui::TableSetupColumn(I18n::TrId("diag_col_status"), ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
-        const auto& stats = m_data.GeneratedStats();
         for (std::size_t i = 0; i < stats.size(); ++i) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(stats[i].displayName.c_str());
+            ImGui::TextUnformatted(WaystoneHelper::StatNameText(UiWords(), stats[i]).c_str());
             ImGui::TableNextColumn();
             ImGui::Text("%d", m_settings.statAggregateKeys.For(stats[i].statId));
             ImGui::TableNextColumn();
             ImGui::PushTextWrapPos(0.0f);
             switch (Calibration().StatusOf(i)) {
                 case WaystoneHelper::StatKeyCalibrator::Status::Confirmed:
-                    ImGui::TextColored(pal.Success, "Confirmed");
+                    ImGui::PushStyleColor(ImGuiCol_Text, pal.Success);
+                    ImGui::TextUnformatted(I18n::Tr("diag_key_confirmed"));
+                    ImGui::PopStyleColor();
                     break;
                 case WaystoneHelper::StatKeyCalibrator::Status::Stale: {
                     const int found = Calibration().Detected(i);
-                    if (found) ImGui::TextColored(pal.Warning, "Not seen; detected %d", found);
-                    else ImGui::TextColored(pal.Warning, "Not seen; looking at more waystones");
+                    ImGui::PushStyleColor(ImGuiCol_Text, pal.Warning);
+                    if (found) ImGui::TextUnformatted(I18n::TrF("diag_key_detected", { { "key", Num(found) } }).c_str());
+                    else ImGui::TextUnformatted(I18n::Tr("diag_key_looking"));
+                    ImGui::PopStyleColor();
                     break;
                 }
-                default:
-                    ImGui::TextDisabled(Calibration().Observations(i) == 0 ? "Not seen yet" : "Checking");
-                    Ui::Tip(Calibration().Observations(i) == 0
-                                ? "No waystone carrying this stat has been looked at yet."
-                                : "Waystones with this stat were seen; the key is being checked.");
+                default: {
+                    const bool unseen = Calibration().Observations(i) == 0;
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                    ImGui::TextUnformatted(unseen ? I18n::Tr("diag_key_not_seen") : I18n::Tr("diag_key_checking"));
+                    ImGui::PopStyleColor();
+                    Ui::Tip(unseen ? I18n::Tr("diag_key_not_seen_tip") : I18n::Tr("diag_key_checking_tip"));
                     break;
+                }
             }
             ImGui::PopTextWrapPos();
         }
@@ -696,21 +807,23 @@ void WaystonePlugin::DrawSectionDiagnostics() {
     {
         WaystoneHelperConfig::StatAggregateKeys defaults;
         ImGui::BeginDisabled(defaults == m_settings.statAggregateKeys);
-        if (Ui::SubtleButton(ICON_FA_ROTATE_LEFT "  Default keys###defaultKeys")) {
+        if (Ui::SubtleButton(IconLabel(ICON_FA_ROTATE_LEFT, I18n::Tr("diag_default_keys"), "defaultKeys").c_str())) {
             m_settings.statAggregateKeys = defaults;
-            m_calibrationNote.clear();
+            m_calibrationChanges.clear();
             SettingsChanged(true);
         }
-        Ui::Tip("Restores the keys of the game version this plugin release was made for.");
+        Ui::Tip(I18n::Tr("diag_default_keys_tip"));
         ImGui::EndDisabled();
     }
 
     ImGui::Spacing();
-    if (Ui::SubtleButton(ICON_FA_FILE_LINES "  Write dump of visible waystones###dump")) WriteDump();
-    Ui::Tip("Writes every mod and stat of the waystones on screen (up to 12) to\n"
-            "debug\\waystone-dump.txt in the plugin folder, for bug reports.\nOpen a stash with waystones first.");
-    if (!m_dumpStatus.empty()) WrappedDisabled(m_dumpStatus);
-    if (m_lastHoveredAddress) WrappedDisabled("Last hovered waystone: " + m_lastHoveredName);
+    if (Ui::SubtleButton(IconLabel(ICON_FA_FILE_LINES, I18n::Tr("diag_dump"), "dump").c_str())) WriteDump();
+    Ui::Tip(I18n::Tr("diag_dump_tip"));
+    if (m_dumpStatus == DumpStatus::Written)
+        WrappedDisabled(I18n::TrF("diag_dump_written", { { "count", Num(m_dumpCount) } }));
+    else if (m_dumpStatus == DumpStatus::Failed)
+        WrappedDisabled(I18n::Tr("diag_dump_failed"));
+    if (m_lastHoveredAddress) WrappedDisabled(I18n::TrF("diag_last_hovered", { { "name", m_lastHoveredName } }));
     Ui::EndDiagnostics();
 }
 

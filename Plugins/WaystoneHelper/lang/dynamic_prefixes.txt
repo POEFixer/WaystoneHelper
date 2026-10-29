@@ -1,0 +1,3 @@
+# Keys WaystoneHelper builds at run time: the affix labels of data/waystone_data.json
+# ("affix_<id>"; tests/test_waystone.cpp checks them against en.json).
+affix_

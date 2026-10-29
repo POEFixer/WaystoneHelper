@@ -88,6 +88,16 @@ enum class LoadResult {
     Unparsable,  // the file is not a JSON object (hand edit, truncated): defaults
 };
 
+// Which note Settings::Load returned, so the settings tab can word it in the
+// program language (the returned text is English, for the log).
+enum class LoadNote {
+    None,
+    UnreadableKept,   // could not be read, a copy was kept as settings.json.bad
+    Unreadable,       // could not be read, no copy
+    Damaged,          // not JSON, kept as settings.json.bad
+    LegacyBorder,     // the single border of a 1.x file became the border group "Border"
+};
+
 struct Settings {
     // Map-stat badges (top right of a waystone).
     bool highlightImportantAffixes     = true;
@@ -147,8 +157,9 @@ struct Settings {
     // Missing, unreadable or damaged file: defaults (an unreadable or damaged file is
     // kept as settings.json.bad when it can be copied; the caller should not write the
     // file again until the player changes a setting). Returns a one-line note when
-    // something was migrated or repaired, else ""; `result` says what was found.
-    std::string Load(const std::filesystem::path& pluginDir, LoadResult* result = nullptr);
+    // something was migrated or repaired, else ""; `result` says what was found and
+    // `note` which note was returned.
+    std::string Load(const std::filesystem::path& pluginDir, LoadResult* result = nullptr, LoadNote* note = nullptr);
     bool Save(const std::filesystem::path& pluginDir) const;
 };
 

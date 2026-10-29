@@ -77,6 +77,10 @@ keeps your groups and hotkey.
 - The plugin's own *Enable* switch and the *Debug mode* option of older versions
   are gone: use the Enabled checkbox of the plugin tab, and the dump button in
   Diagnostics.
+- Languages: the plugin follows the program language. A group added with the
+  *Add border group* or *Add affix group* button is named in the language of
+  that moment ("Group 2", "Группа 2") and keeps that name after a language
+  switch, like any name you type.
 
 ## Credits
 

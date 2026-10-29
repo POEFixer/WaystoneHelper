@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.5
+
+- Follows the program language (ten languages).
+- Affix lines read as the game words them in each language, and the affix filter finds affixes by their translated text.
+
 ## 1.4.4
 
 - Works with the separate menu window (POEFixer 366): the host hands the plugin the right drawing context for its settings tab and for its overlay.

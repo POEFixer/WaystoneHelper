@@ -8,6 +8,12 @@
 
 namespace WaystoneHelper {
 
+// A lang/en.json key written where it is looked up later, at drawing time (what
+// PluginI18n.h's I18n::Key does; these headers stay free of the SDK so the tests
+// compile them alone). tools/plugin_i18n/gen.py --gate checks every Key("...")
+// literal against lang/en.json.
+constexpr const char* Key(const char* key) { return key; }
+
 inline char AsciiLower(char c) {
     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
 }

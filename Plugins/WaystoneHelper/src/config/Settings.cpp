@@ -137,10 +137,13 @@ void Settings::ResetDisplay() {
     *this = std::move(fresh);
 }
 
-std::string Settings::Load(const std::filesystem::path& pluginDir, LoadResult* result) {
+std::string Settings::Load(const std::filesystem::path& pluginDir, LoadResult* result, LoadNote* noteKind) {
     LoadResult unused = LoadResult::Missing;
     LoadResult& res = result ? *result : unused;
     res = LoadResult::Missing;
+    LoadNote unusedNote = LoadNote::None;
+    LoadNote& kind = noteKind ? *noteKind : unusedNote;
+    kind = LoadNote::None;
     const auto path = SettingsPath(pluginDir);
     std::error_code ec;
     // Keep an unusable file for the player instead of letting a later save replace it.
@@ -158,15 +161,18 @@ std::string Settings::Load(const std::filesystem::path& pluginDir, LoadResult* r
     if (!exists || !ReadFile(path, text)) {
         // Locked by another program, no access to the folder: the file is probably fine.
         res = LoadResult::Unreadable;
-        return keepCopy() ? "settings.json could not be read (a copy was kept as settings.json.bad): defaults are "
-                            "used, and the file is left alone until you change a setting."
-                          : "settings.json could not be read: defaults are used, and the file is left alone until "
-                            "you change a setting.";
+        const bool kept = keepCopy();
+        kind = kept ? LoadNote::UnreadableKept : LoadNote::Unreadable;
+        return kept ? "settings.json could not be read (a copy was kept as settings.json.bad): defaults are "
+                      "used, and the file is left alone until you change a setting."
+                    : "settings.json could not be read: defaults are used, and the file is left alone until "
+                      "you change a setting.";
     }
     json j = json::parse(text, nullptr, false);
     if (j.is_discarded() || !j.is_object()) {
         res = LoadResult::Unparsable;
         keepCopy();
+        kind = LoadNote::Damaged;
         return "settings.json was damaged (kept as settings.json.bad): defaults are used, and the file is left "
                "alone until you change a setting.";
     }
@@ -283,6 +289,7 @@ std::string Settings::Load(const std::filesystem::path& pluginDir, LoadResult* r
             r.name = "Border";
             borderRules.push_back(std::move(r));
             note = "The single border of an older version became the border group \"Border\".";
+            kind = LoadNote::LegacyBorder;
         }
     }
 

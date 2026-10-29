@@ -107,6 +107,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\WaystonePlugin.h" />
+    <ClInclude Include="src\lang_en.generated.h" />
     <ClInclude Include="src\config\Settings.h" />
     <ClInclude Include="src\game\ItemRects.h" />
     <ClInclude Include="src\game\StatKeyCalibrator.h" />
@@ -117,6 +118,7 @@
     <ClInclude Include="src\game\WaystoneTypes.h" />
     <ClInclude Include="src\game\WaystoneWorker.h" />
     <ClInclude Include="src\ui\Overlay.h" />
+    <ClInclude Include="src\ui\TextUtil.h" />
     <ClInclude Include="..\..\POEFixer\plugin_sdk\PluginAbi.h" />
     <ClInclude Include="..\..\POEFixer\plugin_sdk\PluginSDK.h" />
     <ClInclude Include="..\..\POEFixer\plugin_sdk\PluginUi.h" />

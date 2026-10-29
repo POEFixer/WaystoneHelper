@@ -88,10 +88,14 @@ private:
     // player changes a setting (the host also saves every minute and on shutdown).
     bool m_writeBlocked = false;
     std::uint64_t m_settingsGeneration = 1;
-    std::string m_settingsNote;
+    std::string m_settingsNote;          // English, for the log
+    WaystoneHelperConfig::LoadNote m_settingsNoteKind = WaystoneHelperConfig::LoadNote::None;   // worded in the tab
+    // The score's breakdown is worded in the program language (PluginI18n): a
+    // language switch re-scores like a settings change.
+    WaystoneHelper::Words m_words;
+    std::uint64_t m_textRevision = 0;
 
     WaystoneHelper::WaystoneData m_data;
-    std::string m_dataStatus;
     // Declared after m_data, which it reads: destroyed (and joined) before it.
     WaystoneHelper::WaystoneWorker m_worker{m_data};
     std::uint64_t m_scanEpoch = 0;       // frames scanned before the last reset are ignored
@@ -99,7 +103,13 @@ private:
     std::shared_ptr<const WaystoneHelper::StatKeyCalibrator> m_calibration;   // from the last frame
     WaystoneHelper::StatKeyCalibrator m_noCalibration;
     WaystoneHelper::ScanStats m_lastStats;
-    std::string m_calibrationNote;
+    // The stat keys the last calibration switched, worded in the Diagnostics card.
+    struct KeyChange {
+        std::size_t stat = 0;   // index into m_data.GeneratedStats()
+        int from = 0;
+        int to = 0;
+    };
+    std::vector<KeyChange> m_calibrationChanges;
 
     std::vector<Shown> m_shown;
     std::unordered_map<std::uintptr_t, ScoreMemo> m_scores;
@@ -119,7 +129,9 @@ private:
     // Diagnostics.
     std::uintptr_t m_lastHoveredAddress = 0;
     std::string m_lastHoveredName;
-    std::string m_dumpStatus;
+    enum class DumpStatus { None, Written, Failed };
+    DumpStatus m_dumpStatus = DumpStatus::None;
+    int m_dumpCount = 0;
 
     // Settings-tab state.
     std::unordered_map<std::string, std::string> m_affixSearch;

@@ -1,4 +1,5 @@
-#include "WaystonePlugin.h"
+#include "WaystonePlugin.h"      // PluginSDK.h
+#include "lang_en.generated.h"   // the embedded English: once per DLL, after PluginSDK.h
 
 #include "game/WaystoneDataEmbedded.h"
 #include "ui/Overlay.h"
@@ -12,7 +13,7 @@
 POEFIXER_PLUGIN_INFO(
     "WaystoneHelper",
     "Waystone Helper",
-    "1.4.4",
+    "1.4.5",
     "Omer Faruk ARPA, POEFixer",
     "Marks waystones in your inventory and stash with affix-count, map-stat and affix-group badges, coloured borders by your own rules, and a hover breakdown.")
 
@@ -24,6 +25,11 @@ using WaystoneHelper::Score;
 
 namespace {
 constexpr int kRescoreIntervalMs = 50;   // settings edits redraw at this pace at most
+
+// The score's words in the program language (Words::translate).
+std::string TranslateWords(const char* key, WaystoneHelper::Words::Args args) {
+    return PluginSDK::I18n::TrF(key, args);
+}
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +50,7 @@ void WaystonePlugin::OnEnable(bool) {
 
     m_settings = WaystoneHelperConfig::Settings{};
     WaystoneHelperConfig::LoadResult loadResult = WaystoneHelperConfig::LoadResult::Missing;
-    m_settingsNote = m_settings.Load(DirectoryPath(), &loadResult);
+    m_settingsNote = m_settings.Load(DirectoryPath(), &loadResult, &m_settingsNoteKind);
     m_loaded = true;
     m_writeBlocked = loadResult == WaystoneHelperConfig::LoadResult::Unreadable ||
                      loadResult == WaystoneHelperConfig::LoadResult::Unparsable;
@@ -55,7 +61,9 @@ void WaystonePlugin::OnEnable(bool) {
     text.reserve(WaystoneHelper::Embedded::kWaystoneDataSize);
     for (std::size_t i = 0; i < WaystoneHelper::Embedded::kWaystoneDataChunkCount; ++i)
         text += WaystoneHelper::Embedded::kWaystoneDataChunks[i];
-    m_dataStatus = m_data.LoadFromText(text);
+    m_data.LoadFromText(text);
+    m_words.translate = &TranslateWords;
+    m_textRevision = PluginSDK::I18n::Revision();
 
     PushOptions();
     ResetScanState(true);
@@ -128,7 +136,8 @@ void WaystonePlugin::Rescore() {
             continue;
         memo.parsedGeneration = s.parsed->generation;
         memo.settingsGeneration = m_settingsGeneration;
-        memo.score = std::make_shared<const Score>(WaystoneHelper::Evaluate(m_settings, m_data, *s.parsed, s.name));
+        memo.score =
+            std::make_shared<const Score>(WaystoneHelper::Evaluate(m_settings, m_data, *s.parsed, s.name, m_words));
         s.score = memo.score;
     }
     m_scoredGeneration = m_settingsGeneration;
@@ -141,6 +150,13 @@ void WaystonePlugin::Rescore() {
 void WaystonePlugin::DrawUI() {
     if (!m_loaded || !ctx()->ImGuiContext) return;
     BindImGui();
+
+    // The breakdown texts are built in the program language: re-score after a switch.
+    const std::uint64_t textRevision = PluginSDK::I18n::Revision();
+    if (textRevision != m_textRevision) {
+        m_textRevision = textRevision;
+        ++m_settingsGeneration;
+    }
 
     const ImGuiIO& io = ImGui::GetIO();
     // The worker scans only while this heartbeat says so; every early return idles it.
@@ -224,7 +240,8 @@ void WaystonePlugin::AdoptFrame(const WaystoneHelper::ScanFrame& frame) {
         } else {
             memo.parsedGeneration = v.parsed->generation;
             memo.settingsGeneration = m_settingsGeneration;
-            memo.score = std::make_shared<const Score>(WaystoneHelper::Evaluate(m_settings, m_data, *v.parsed, v.name));
+            memo.score =
+                std::make_shared<const Score>(WaystoneHelper::Evaluate(m_settings, m_data, *v.parsed, v.name, m_words));
         }
         Shown s;
         s.address = v.address;
@@ -246,7 +263,8 @@ void WaystonePlugin::AdoptFrame(const WaystoneHelper::ScanFrame& frame) {
 void WaystonePlugin::ApplyCalibration() {
     if (!m_calibration) return;
     const auto& tracked = m_data.GeneratedStats();
-    std::string changed;
+    std::string changed;   // English, for the log
+    std::vector<KeyChange> changes;
     for (std::size_t i = 0; i < tracked.size(); ++i) {
         int* slot = m_settings.statAggregateKeys.Slot(tracked[i].statId);
         if (!slot) continue;
@@ -254,11 +272,12 @@ void WaystonePlugin::ApplyCalibration() {
         if (replacement == 0) continue;
         if (!changed.empty()) changed += ", ";
         changed += tracked[i].displayName + " " + std::to_string(*slot) + " -> " + std::to_string(replacement);
+        changes.push_back(KeyChange{i, *slot, replacement});
         *slot = replacement;
     }
     if (changed.empty()) return;
-    m_calibrationNote = "Stat keys updated after a game change: " + changed + ".";
-    ctx()->Log.Info(("Waystone Helper: " + m_calibrationNote).c_str());
+    m_calibrationChanges = std::move(changes);
+    ctx()->Log.Info(("Waystone Helper: Stat keys updated after a game change: " + changed + ".").c_str());
     SettingsChanged(true, /*byPlayer=*/false);
     Save();
 }
@@ -319,12 +338,10 @@ void WaystonePlugin::WriteDump() {
         const auto dir = DirectoryPath() / "debug";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
-        if (FileIO::AtomicWrite(dir / "waystone-dump.txt", all))
-            m_dumpStatus = "Written to debug\\waystone-dump.txt (" + std::to_string(std::min(n, 12)) + " waystones).";
-        else
-            m_dumpStatus = "Could not write debug\\waystone-dump.txt.";
+        m_dumpCount = std::min(n, 12);
+        m_dumpStatus = FileIO::AtomicWrite(dir / "waystone-dump.txt", all) ? DumpStatus::Written : DumpStatus::Failed;
     } catch (...) {
-        m_dumpStatus = "Could not write debug\\waystone-dump.txt.";
+        m_dumpStatus = DumpStatus::Failed;
     }
 }
 
